@@ -109,6 +109,21 @@
       padding: 15px; border-radius: 8px; text-align: center;
       animation: pulse 2s infinite;
     }
+    .message-box {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      color: #bde8ff;
+      font-size: 0.9rem;
+    }
+    .message-box.hidden { display: none; }
+    .message-box.error {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #fee2e2;
+    }
     .alert-box.hidden { display: none; }
     @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 10px rgba(239,68,68,0); } }
 
@@ -126,6 +141,15 @@
       padding: 10px; text-align: center; border-radius: 6px; cursor: pointer; width: 100%; margin-bottom: 8px;
     }
     .upload-label:hover { border-color: var(--accent); }
+    .preview-panel {
+      margin-top: 12px; padding: 12px; border: 1px solid var(--border);
+      border-radius: 8px; background: rgba(56, 189, 248, 0.06); color: var(--text);
+    }
+    .preview-panel.hidden { display: none; }
+    .preview-item { margin-bottom: 12px; }
+    .preview-item:last-child { margin-bottom: 0; }
+    .preview-title { font-weight: 700; margin-bottom: 6px; }
+    .preview-text { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 0.85rem; white-space: pre-wrap; line-height: 1.4; max-height: 180px; overflow: hidden; }
   </style>
 </head>
 <body data-theme="blue-horizon">
@@ -161,9 +185,9 @@
       <!-- File Center -->
       <div class="panel">
         <h2>File Center</h2>
-        <label for="fileInput" class="upload-label">+ UPLOAD FILE</label>
-        <input type="file" id="fileInput" multiple>
-        <ul id="queueList" class="queue-list"><li style="opacity:0.5">Queue empty.</li></ul>
+      <label for="fileInput" class="upload-label">+ UPLOAD TEXT FILE</label>
+      <input type="file" id="fileInput" accept="text/*,.txt,.md,.csv,.log" multiple>
+      <div id="messageBox" class="message-box hidden"></div>
       </div>
 
       <!-- Print History -->
@@ -244,7 +268,9 @@
       soundBtn: document.getElementById('soundBtn'),
       resetBtn: document.getElementById('resetBtn'),
       fileInput: document.getElementById('fileInput'),
+      messageBox: document.getElementById('messageBox'),
       queueList: document.getElementById('queueList'),
+      previewPanel: document.getElementById('previewPanel'),
       historyList: document.getElementById('historyList'),
       copies: document.getElementById('copies'),
       watermark: document.getElementById('watermark'),
@@ -281,13 +307,35 @@
       els.queueList.innerHTML = '';
       if (state.queue.length === 0) {
         els.queueList.innerHTML = '<li style="opacity:0.5">Queue empty.</li>';
+        els.previewPanel.classList.add('hidden');
+        els.previewPanel.innerHTML = '';
         return;
       }
-      state.queue.forEach((file, idx) => {
+      state.queue.forEach((item, idx) => {
         const li = document.createElement('li');
-        li.innerHTML = `<span>${file.name}</span><button class="secondary" onclick="removeFromQueue(${idx})">✕</button>`;
+        const typeLabel = item.file.type || 'text/plain';
+        li.innerHTML = `<span>${item.file.name} <small style="opacity:.7">(${typeLabel})</small></span><button class="secondary" onclick="removeFromQueue(${idx})">✕</button>`;
         els.queueList.appendChild(li);
       });
+      updatePreviewUI();
+    }
+
+    function updatePreviewUI() {
+      els.previewPanel.innerHTML = '';
+      if (state.queue.length === 0) {
+        els.previewPanel.classList.add('hidden');
+        return;
+      }
+      state.queue.forEach(item => {
+        const section = document.createElement('div');
+        section.className = 'preview-item';
+        section.innerHTML = `
+          <div class="preview-title">Preview: ${item.file.name}</div>
+          <div class="preview-text">${item.preview || 'Loading preview...'}</div>
+        `;
+        els.previewPanel.appendChild(section);
+      });
+      els.previewPanel.classList.remove('hidden');
     }
 
     window.removeFromQueue = (idx) => {
@@ -297,14 +345,57 @@
     };
 
     // File Upload
+    function isTextFile(file) {
+      return file.type.startsWith('text/') || /\.(txt|md|csv|log)$/i.test(file.name);
+    }
+
+    function showMessage(text, type = 'info') {
+      els.messageBox.textContent = text;
+      els.messageBox.className = `message-box ${type}`;
+      els.messageBox.classList.remove('hidden');
+      clearTimeout(window._messageTimer);
+      window._messageTimer = setTimeout(() => els.messageBox.classList.add('hidden'), 4000);
+    }
+
     els.fileInput.addEventListener('change', (e) => {
-      Array.from(e.target.files).forEach(file => {
-        state.queue.push(file);
+      const files = Array.from(e.target.files);
+      const accepted = [];
+      const rejected = [];
+
+      files.forEach(file => {
+        if (isTextFile(file)) accepted.push(file);
+        else rejected.push(file);
       });
-      e.target.value = ''; // reset input
-      updateQueueUI();
-      checkPrintReadiness();
-      playBeep();
+
+      if (accepted.length) {
+        accepted.forEach(file => {
+          const queueItem = { file, preview: 'Loading preview...', content: '' };
+          state.queue.push(queueItem);
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const content = event.target.result || '';
+            queueItem.content = content;
+            const previewText = content.split(/\r?\n/).slice(0, 6).join('\n');
+            queueItem.preview = previewText || '[Empty file]';
+            updatePreviewUI();
+          };
+          reader.onerror = () => {
+            queueItem.preview = '[Unable to read preview]';
+            queueItem.content = '';
+            updatePreviewUI();
+          };
+          reader.readAsText(file);
+        });
+        updateQueueUI();
+        checkPrintReadiness();
+        playBeep();
+      }
+
+      if (rejected.length) {
+        showMessage('Only text files are supported. Please upload TXT / MD / CSV / LOG files.', 'error');
+      }
+
+      e.target.value = '';
     });
 
     // Theme Switcher
@@ -372,6 +463,8 @@
       const job = state.queue.shift();
       const copies = parseInt(els.copies.value) || 1;
       const settings = { wm: els.watermark.value, type: els.printType.value, qual: els.quality.value };
+      const fileName = job.file ? job.file.name : job.name;
+      const fileContent = job.content || '';
 
       // Simulate Print Process
       for (let i = 1; i <= 100; i += 10) {
@@ -392,13 +485,14 @@
 
       // Add to History
       state.history.unshift({
-        file: job.name,
+        file: fileName,
         copies,
         settings,
         status: 'Completed',
         time: new Date().toLocaleTimeString()
       });
       updateHistoryUI();
+      printTextJob({ fileName, content: fileContent, settings, copies });
 
       state.isPrinting = false;
       els.progressBar.style.display = 'none';
@@ -425,6 +519,47 @@
         `;
         els.historyList.appendChild(li);
       });
+    }
+
+    // Print helper
+    function escapeHtml(value) {
+      return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function printTextJob({ fileName, content, settings, copies }) {
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        showMessage('Unable to open print dialog. Please allow popups and try again.', 'error');
+        return;
+      }
+      const bodyHtml = `
+        <html>
+          <head>
+            <title>Print: ${escapeHtml(fileName)}</title>
+            <style>
+              body { font-family: system-ui, sans-serif; margin: 24px; color: #111; }
+              h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+              .meta { margin-bottom: 1rem; color: #444; }
+              pre { white-space: pre-wrap; word-wrap: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace; font-size: 0.95rem; line-height: 1.5; }
+              .watermark { margin-top: 1rem; font-size: 0.9rem; color: #666; }
+            </style>
+          </head>
+          <body>
+            <h1>${escapeHtml(fileName)}</h1>
+            <div class="meta">Print type: ${escapeHtml(settings.type)} · Quality: ${escapeHtml(settings.qual)} · Copies: ${escapeHtml(String(copies))}</div>
+            <pre>${escapeHtml(content || '[No text content available]')}</pre>
+            <div class="watermark">Watermark: ${escapeHtml(settings.wm)}</div>
+          </body>
+        </html>
+      `;
+      printWindow.document.write(bodyHtml);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
     }
 
     // Sound Feedback
