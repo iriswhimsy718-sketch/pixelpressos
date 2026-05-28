@@ -219,7 +219,6 @@
 
       <!-- Execute -->
       <button id="executeBtn" class="execute-btn" disabled>EXECUTE SYSTEM PRINT</button>
-      <button id="printPageBtn" class="execute-btn">PRINT THIS PAGE</button>
       <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
     </main>
   </div>
@@ -258,8 +257,7 @@
       execute: document.getElementById('executeBtn'),
       progressBar: document.getElementById('progressBar'),
       progressFill: document.getElementById('progressFill'),
-      theme: document.getElementById('theme'),
-      printPage: document.getElementById('printPageBtn')
+      theme: document.getElementById('theme')
     };
 
     // Initialize
@@ -407,10 +405,6 @@
       els.progressFill.style.width = '0%';
       playBeep();
       checkPrintReadiness();
-    });
-
-    els.printPage.addEventListener('click', () => {
-      window.print();
     });
 
     // History UI
